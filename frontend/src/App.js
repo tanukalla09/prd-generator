@@ -26,7 +26,7 @@ function App() {
       await new Promise(r => setTimeout(r, 1000));
 
       setStep('AI is generating your PRD...');
-      const res = await axios.post('http://localhost:5000/api/generate', { repoUrl: url });
+      const res = await axios.post('https://prd-generator-3oqy.onrender.com/api/generate', { repoUrl: url });
 
       setStep('PRD Generated!');
       setPrd(res.data.prd);
@@ -42,7 +42,7 @@ function App() {
     setDownloading(true);
     try {
       const res = await axios.post(
-        'http://localhost:5000/api/download',
+        'https://prd-generator-3oqy.onrender.com/api/download',
         { prd, repoName, format },
         { responseType: 'blob' }
       );
