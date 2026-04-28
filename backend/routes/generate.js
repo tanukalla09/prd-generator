@@ -2,18 +2,19 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const Groq = require('groq-sdk');
-const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
-const PDFDocument = require('pdfkit');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 async function fetchRepoData(repoUrl) {
-  const cleanUrl = repoUrl.replace('git@github.com:', 'github.com/').replace('.git', '').trim();
+  const cleanUrl = repoUrl
+    .replace('git@github.com:', 'github.com/')
+    .replace('.git', '')
+    .trim();
   const match = cleanUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
   if (!match) throw new Error('Invalid GitHub URL');
 
   const [, owner, repo] = match;
-  const headers = { 
+  const headers = {
     Authorization: `token ${process.env.GITHUB_TOKEN}`,
     'Accept': 'application/vnd.github.v3+json'
   };
@@ -31,265 +32,178 @@ async function fetchRepoData(repoUrl) {
     readme = 'No README found';
   }
 
-  // Fetch file tree
-  let fileTree = '';
-  let codeContents = '';
+  // Fetch full file tree
+  let allFiles = [];
   try {
     const treeRes = await axios.get(
-      `${baseUrl}/git/trees/HEAD?recursive=1`, 
+      `${baseUrl}/git/trees/HEAD?recursive=1`,
       { headers }
     );
-    
-    const files = treeRes.data.tree
+    allFiles = treeRes.data.tree
       .filter(function(f) { return f.type === 'blob'; })
       .map(function(f) { return f.path; });
+  } catch {
+    console.log('Could not fetch file tree');
+  }
 
-    fileTree = files.join('\n');
+  console.log('TOTAL FILES FOUND:', allFiles.length);
+  console.log('ALL FILES:', allFiles);
 
-    // Read important code files
-    // Sort to prioritize model and route files first
-    files.sort(function(a, b) {
-      const priority = ['model', 'route', 'controller', 'schema', 'entity'];
-      const aPriority = priority.some(function(p) { return a.toLowerCase().includes(p); });
-      const bPriority = priority.some(function(p) { return b.toLowerCase().includes(p); });
-      if (aPriority && !bPriority) return -1;
-      if (!aPriority && bPriority) return 1;
-      return 0;
+  // Skip useless files
+  const skipFolders = [
+    'node_modules/', '.git/', '__pycache__/',
+    'dist/', 'build/', '.next/', 'venv/',
+    'env/', 'coverage/', '.nyc_output/'
+  ];
+  const skipExtensions = [
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',
+    '.pdf', '.zip', '.tar', '.gz', '.mp4', '.mp3',
+    '.ttf', '.woff', '.woff2', '.eot',
+    '.min.js', '.min.css', '.map'
+  ];
+
+  const codeExtensions = [
+    '.py', '.js', '.ts', '.jsx', '.tsx',
+    '.java', '.go', '.rs', '.cpp', '.c',
+    '.cs', '.php', '.rb', '.swift', '.kt',
+    '.html', '.css', '.scss', '.sql',
+    '.json', '.yaml', '.yml', '.toml',
+    '.sh', '.bash', '.cfg', '.ini', '.md', '.txt'
+  ];
+
+  // Filter to only code files
+  const codeFiles = allFiles.filter(function(f) {
+    const shouldSkipFolder = skipFolders.some(function(folder) {
+      return f.startsWith(folder);
     });
+    if (shouldSkipFolder) return false;
 
-    const importantFiles = files.filter(function(f) {
-      return (
-        f.endsWith('.py') ||
-        f.endsWith('.js') ||
-        f.endsWith('.ts') ||
-        f.endsWith('.jsx') ||
-        f.endsWith('.tsx') ||
-        f.endsWith('.java') ||
-        f.endsWith('.go') ||
-        f.endsWith('.rs') ||
-        f.endsWith('.cpp') ||
-        f.endsWith('.c') ||
-        f.endsWith('.cs') ||
-        f.endsWith('.php') ||
-        f === 'package.json' ||
-        f === 'requirements.txt' ||
-        f === 'Dockerfile' ||
-        f === 'docker-compose.yml' ||
-        f === '.env.example' ||
-        f === 'config.py' ||
-        f === 'settings.py' ||
-        f === 'app.py' ||
-        f === 'main.py' ||
-        f === 'index.js' ||
-        f === 'server.js' ||
-        f === 'app.js'
-      );
-    }).slice(0, 15); // max 15 files to stay within limits
+    const shouldSkipExt = skipExtensions.some(function(ext) {
+      return f.endsWith(ext);
+    });
+    if (shouldSkipExt) return false;
 
-    // Read each file content
-    const fileContents = await Promise.all(
-      importantFiles.map(async function(filePath) {
-        try {
-          const fileRes = await axios.get(
-            `${baseUrl}/contents/${filePath}`,
-            { headers }
-          );
-          if (fileRes.data.encoding === 'base64') {
-            const content = Buffer.from(fileRes.data.content, 'base64').toString('utf-8');
-            return `\n\n=== FILE: ${filePath} ===\n${content.slice(0, 500)}`;
-          }
-          return '';
-        } catch {
-          return '';
+    return codeExtensions.some(function(ext) {
+      return f.endsWith(ext);
+    });
+  });
+
+  // Sort — models, routes, controllers first
+  codeFiles.sort(function(a, b) {
+    const priority = ['model', 'route', 'controller', 'schema', 'entity', 'service'];
+    const aPriority = priority.some(function(p) {
+      return a.toLowerCase().includes(p);
+    });
+    const bPriority = priority.some(function(p) {
+      return b.toLowerCase().includes(p);
+    });
+    if (aPriority && !bPriority) return -1;
+    if (!aPriority && bPriority) return 1;
+    return 0;
+  });
+
+  console.log('CODE FILES TO READ:', codeFiles.slice(0, 30));
+
+  // Read each file — up to 40 files
+  const filesToRead = codeFiles.slice(0, 40);
+  const fileContents = await Promise.all(
+    filesToRead.map(async function(filePath) {
+      try {
+        const fileRes = await axios.get(
+          `${baseUrl}/contents/${filePath}`,
+          { headers }
+        );
+        if (fileRes.data.encoding === 'base64') {
+          const content = Buffer.from(
+            fileRes.data.content, 'base64'
+          ).toString('utf-8');
+          console.log(`READ FILE: ${filePath} (${content.length} chars)`);
+          return `\n\n=============================\nFILE: ${filePath}\n=============================\n${content.slice(0, 1500)}`;
         }
-      })
-    );
+        return '';
+      } catch (e) {
+        console.log(`FAILED TO READ: ${filePath}`, e.message);
+        return '';
+      }
+    })
+  );
 
-    codeContents = fileContents.join('\n');
-  } catch {
-    fileTree = 'Could not fetch file tree';
-  }
-
-  // Fetch dependencies
-  let dependencies = '';
-  try {
-    const pkgRes = await axios.get(
-      `https://raw.githubusercontent.com/${owner}/${repo}/main/package.json`
-    );
-    dependencies = JSON.stringify(pkgRes.data.dependencies || {});
-  } catch {
-    try {
-      const reqRes = await axios.get(
-        `https://raw.githubusercontent.com/${owner}/${repo}/main/requirements.txt`
-      );
-      dependencies = reqRes.data;
-    } catch {
-      dependencies = 'No dependency file found';
-    }
-  }
+  const codeContents = fileContents.filter(Boolean).join('\n');
+  console.log('TOTAL CODE CONTENT LENGTH:', codeContents.length);
 
   return {
     name: repoData.data.name,
-    description: repoData.data.description || 'No description',
+    description: repoData.data.description || 'No description provided',
     language: repoData.data.language || 'Unknown',
     stars: repoData.data.stargazers_count,
     forks: repoData.data.forks_count,
     topics: repoData.data.topics ? repoData.data.topics.join(', ') : '',
-    readme: readme.slice(0, 2000),
-    fileTree: fileTree.slice(0, 1000),
-    codeContents: codeContents.slice(0, 4000),
-    dependencies
+    readme: readme.slice(0, 3000),
+    fileList: codeFiles.join('\n'),
+    codeContents: codeContents.slice(0, 15000),
   };
 }
+
 async function generatePRD(repoInfo) {
   const chatCompletion = await groq.chat.completions.create({
     messages: [
       {
         role: 'system',
-        content: 'You are a senior product manager who writes professional, detailed Product Requirements Documents based on deep analysis of actual code and repository structure.'
+        content: `You are a senior product manager who writes accurate Product Requirements Documents based ONLY on actual code analysis. You never guess or assume — you only write what you can see in the code.`
       },
       {
         role: 'user',
-        content: `Analyze this GitHub repository thoroughly and write a complete professional Product Requirements Document (PRD).
+        content: `Analyze this GitHub repository's ACTUAL CODE and write a complete PRD.
 
-REPOSITORY DETAILS:
-Name: ${repoInfo.name}
-Description: ${repoInfo.description}
-Primary Language: ${repoInfo.language}
-Stars: ${repoInfo.stars}
-Forks: ${repoInfo.forks}
-Topics: ${repoInfo.topics}
+REPOSITORY NAME: ${repoInfo.name}
+DESCRIPTION: ${repoInfo.description}
+LANGUAGE: ${repoInfo.language}
+STARS: ${repoInfo.stars}
+TOPICS: ${repoInfo.topics}
 
-README CONTENT:
+README:
 ${repoInfo.readme}
 
-FULL FILE STRUCTURE:
-${repoInfo.fileTree}
+COMPLETE FILE LIST:
+${repoInfo.fileList}
 
-ACTUAL CODE CONTENT FROM KEY FILES:
+ACTUAL CODE FROM FILES:
 ${repoInfo.codeContents}
 
-DEPENDENCIES:
-${repoInfo.dependencies}
+STRICT RULES:
+1. DO NOT use the repository name to decide what the project is
+2. READ the actual code files carefully to understand what this project does
+3. Look at model/schema files to understand what data is managed (students, teachers, products, orders etc)
+4. Look at route files to find actual API endpoints
+5. Look at controller files to find actual features
+6. If you see Student, Teacher, Class, Subject models — write it is a School Management System
+7. If you see Product, Order, Cart models — write it is an E-commerce system
+8. ONLY write features that actually exist in the code
+9. Be specific — mention actual file names, route names, model names from the code
 
-CRITICAL INSTRUCTIONS:
-- IGNORE the repository name completely when deciding what the project is
-- ONLY determine what the project does by reading the ACTUAL CODE FILES provided
-- Look at route files, model files, controller files to understand real features
-- Look at database models to understand what data is being managed
-- Look at API endpoints to understand what actions are supported
-- If you see models like Student, Teacher, Class, Subject — it is a School Management System
-- If you see models like Order, Product, Cart — it is an E-commerce system
-- NEVER guess based on the repo name — always read the code
-- Do NOT make up features — only write what is actually in the code files
-
-Write a PRD with these exact sections:
-1. Project Overview (based on actual code analysis)
-2. Problem Statement (what problem does this code actually solve)
-3. Target Users (who would use this based on what the code does)
-4. Key Features (extracted from actual code files — be specific)
-5. Technical Architecture (based on actual file structure and code)
+Write a complete PRD with these sections:
+1. Project Overview (what does this project ACTUALLY do based on the code)
+2. Problem Statement
+3. Target Users
+4. Key Features (from actual code — list real routes, models, functions)
+5. Technical Architecture (actual file structure and patterns used)
 6. Installation Guide (based on actual files found)
-7. Dependencies and Requirements (from actual dependency files)
-8. Setup and Run Instructions (based on actual code)
-9. API Endpoints / Functions (if found in code)
-10. Possible Integrations (based on actual code)
-11. Alternative Tools
-12. Recommended Infrastructure (mention Hostinger at https://hostinger.com and GoDaddy at https://godaddy.com)
-
-Make it detailed, accurate, and based entirely on the actual code — not assumptions.`
+7. Dependencies and Requirements (from actual package files)
+8. API Endpoints (list actual routes found in code)
+9. Database Models (list actual models/schemas found)
+10. Setup and Run Instructions
+11. Possible Integrations
+12. Recommended Infrastructure (mention Hostinger at https://hostinger.com and GoDaddy at https://godaddy.com)`
       }
     ],
     model: 'llama-3.3-70b-versatile',
-    temperature: 0.3,
-    max_tokens: 3000
+    temperature: 0.1,
+    max_tokens: 4000
   });
 
   return chatCompletion.choices[0].message.content;
 }
 
-// Generate DOCX
-async function generateDOCX(prdText, repoName) {
-  const lines = prdText.split('\n');
-  const children = [];
-
-  children.push(
-    new Paragraph({
-      text: 'Product Requirements Document',
-      heading: HeadingLevel.TITLE,
-    }),
-    new Paragraph({
-      text: repoName,
-      heading: HeadingLevel.HEADING_1,
-    }),
-    new Paragraph({ text: '' })
-  );
-
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      children.push(new Paragraph({
-        text: line.replace('## ', ''),
-        heading: HeadingLevel.HEADING_2,
-      }));
-    } else if (line.startsWith('**') && line.endsWith('**')) {
-      children.push(new Paragraph({
-        children: [new TextRun({ text: line.replace(/\*\*/g, ''), bold: true })],
-      }));
-    } else if (line.trim().startsWith('* ')) {
-      children.push(new Paragraph({
-        text: line.replace('* ', ''),
-        bullet: { level: 0 },
-      }));
-    } else if (line.trim() !== '') {
-      children.push(new Paragraph({ text: line }));
-    } else {
-      children.push(new Paragraph({ text: '' }));
-    }
-  }
-
-  const doc = new Document({ sections: [{ children }] });
-  return await Packer.toBuffer(doc);
-}
-
-// Generate PDF
-function generatePDF(prdText, repoName) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
-    const buffers = [];
-
-    doc.on('data', chunk => buffers.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(buffers)));
-    doc.on('error', reject);
-
-    // Title
-    doc.fontSize(24).font('Helvetica-Bold').text('Product Requirements Document', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(18).text(repoName, { align: 'center' });
-    doc.moveDown(2);
-
-    // Content
-    const lines = prdText.split('\n');
-    for (const line of lines) {
-      if (line.startsWith('## ')) {
-        doc.moveDown();
-        doc.fontSize(14).font('Helvetica-Bold').text(line.replace('## ', ''));
-        doc.moveDown(0.5);
-      } else if (line.startsWith('**') && line.endsWith('**')) {
-        doc.fontSize(11).font('Helvetica-Bold').text(line.replace(/\*\*/g, ''));
-      } else if (line.trim().startsWith('* ')) {
-        doc.fontSize(10).font('Helvetica').text('  • ' + line.replace('* ', ''));
-      } else if (line.trim() !== '') {
-        doc.fontSize(10).font('Helvetica').text(line);
-      } else {
-        doc.moveDown(0.3);
-      }
-    }
-
-    doc.end();
-  });
-}
-
-// Main generate route
 router.post('/generate', async (req, res) => {
   const { repoUrl } = req.body;
 
@@ -302,10 +216,8 @@ router.post('/generate', async (req, res) => {
   try {
     console.log('Fetching repo: ' + repoUrl);
     const repoInfo = await fetchRepoData(repoUrl);
-
     console.log('Generating PRD for: ' + repoInfo.name);
     const prd = await generatePRD(repoInfo);
-
     res.json({
       success: true,
       repoName: repoInfo.name,
@@ -317,7 +229,6 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-// Download route
 router.post('/download', async (req, res) => {
   const { prd, repoName, format } = req.body;
 
@@ -329,17 +240,83 @@ router.post('/download', async (req, res) => {
     }
 
     if (format === 'docx') {
-      const buffer = await generateDOCX(prd, repoName);
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+      const lines = prd.split('\n');
+      const children = [];
+
+      children.push(
+        new Paragraph({
+          text: 'Product Requirements Document',
+          heading: HeadingLevel.TITLE,
+        }),
+        new Paragraph({ text: repoName, heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: '' })
+      );
+
+      for (const line of lines) {
+        if (line.startsWith('## ') || line.startsWith('### ')) {
+          children.push(new Paragraph({
+            text: line.replace(/#{1,3} /, ''),
+            heading: HeadingLevel.HEADING_2,
+          }));
+        } else if (line.startsWith('**') && line.endsWith('**')) {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: line.replace(/\*\*/g, ''), bold: true })],
+          }));
+        } else if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
+          children.push(new Paragraph({
+            text: line.replace(/^[*-] /, ''),
+            bullet: { level: 0 },
+          }));
+        } else if (line.trim() !== '') {
+          children.push(new Paragraph({ text: line }));
+        } else {
+          children.push(new Paragraph({ text: '' }));
+        }
+      }
+
+      const doc = new Document({ sections: [{ children }] });
+      const buffer = await Packer.toBuffer(doc);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
       res.setHeader('Content-Disposition', `attachment; filename="${repoName}-PRD.docx"`);
       return res.send(buffer);
     }
 
     if (format === 'pdf') {
-      const buffer = await generatePDF(prd, repoName);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${repoName}-PRD.pdf"`);
-      return res.send(buffer);
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ margin: 50 });
+      const buffers = [];
+      doc.on('data', chunk => buffers.push(chunk));
+      doc.on('end', () => {
+        const buffer = Buffer.concat(buffers);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${repoName}-PRD.pdf"`);
+        res.send(buffer);
+      });
+
+      doc.fontSize(24).font('Helvetica-Bold').text('Product Requirements Document', { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(18).text(repoName, { align: 'center' });
+      doc.moveDown(2);
+
+      const lines = prd.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('## ') || line.startsWith('### ')) {
+          doc.moveDown();
+          doc.fontSize(14).font('Helvetica-Bold').text(line.replace(/#{1,3} /, ''));
+          doc.moveDown(0.5);
+        } else if (line.startsWith('**') && line.endsWith('**')) {
+          doc.fontSize(11).font('Helvetica-Bold').text(line.replace(/\*\*/g, ''));
+        } else if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
+          doc.fontSize(10).font('Helvetica').text('  • ' + line.replace(/^[*-] /, ''));
+        } else if (line.trim() !== '') {
+          doc.fontSize(10).font('Helvetica').text(line);
+        } else {
+          doc.moveDown(0.3);
+        }
+      }
+      doc.end();
+      return;
     }
 
     res.status(400).json({ error: 'Invalid format' });
