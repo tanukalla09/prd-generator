@@ -5,14 +5,16 @@ import './App.css';
 const API_BASE_URL = 'https://prd-generator-3oqy.onrender.com';
 
 function App() {
+  
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [prd, setPrd] = useState('');
   const [repoName, setRepoName] = useState('');
   const [error, setError] = useState('');
-  const [step, setStep] = useState('');
+  const [steps, setSteps] = useState([]);
   const [format, setFormat] = useState('txt');
   const [downloading, setDownloading] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const handleGenerate = async () => {
     if (!url) return setError('Please enter a GitHub URL');
@@ -24,13 +26,35 @@ function App() {
     setPrd('');
 
     try {
-      setStep('Fetching repository data...');
-      await new Promise(r => setTimeout(r, 1000));
+      setSteps([
+        { text: 'Fetching repo data', done: false },
+        { text: 'Reading README...', done: false },
+        { text: 'Generating PRD...', done: false }
+      ]);
 
-      setStep('AI is generating your PRD...');
+      await new Promise(r => setTimeout(r, 1000));
+      setSteps([
+        { text: 'Fetching repo data', done: true },
+        { text: 'Reading README...', done: false },
+        { text: 'Generating PRD...', done: false }
+      ]);
+
+      await new Promise(r => setTimeout(r, 1000));
+      setSteps([
+        { text: 'Fetching repo data', done: true },
+        { text: 'Reading README...', done: true },
+        { text: 'Generating PRD...', done: false }
+      ]);
+
       const res = await axios.post(`${API_BASE_URL}/api/generate`, { repoUrl: url });
 
-      setStep('PRD Generated!');
+      setSteps([
+        { text: 'Fetching repo data', done: true },
+        { text: 'Reading README...', done: true },
+        { text: 'Generating PRD...', done: true }
+      ]);
+
+      await new Promise(r => setTimeout(r, 500));
       setPrd(res.data.prd);
       setRepoName(res.data.repoName);
     } catch (err) {
@@ -55,7 +79,7 @@ function App() {
         pdf: 'application/pdf',
         docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       };
-
+      
       const blob = new Blob([res.data], { type: mimeTypes[format] });
       const link = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -71,6 +95,15 @@ function App() {
 
   return (
     <div className="app">
+      <nav className="navbar">
+        <div className="nav-logo">RepoDoc AI</div>
+        <div className="nav-links">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it Works</a>
+          <a href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+        <button className="nav-cta" onClick={handleGenerate}>Try Free</button>
+      </nav>
       <div className="hero">
         <h1>GitHub Repo to PRD Generator</h1>
         <p>Paste a GitHub URL. Get a professional PRD instantly.</p>
@@ -88,40 +121,89 @@ function App() {
         </div>
 
         {error && <p className="error">{error}</p>}
-        {loading && <p className="step">{step}</p>}
+        {loading && (
+          <div className="steps-progress">
+            <div className="spinner"></div>
+            {steps.map(function(s, i) {
+              return (
+                <div key={i} className={'progress-step ' + (s.done ? 'done' : 'pending')}>
+                  <span className="progress-icon">{s.done ? '✅' : '⏳'}</span>
+                  <span>{s.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-
-      {!prd && !loading && (
-        <div className="features">
-          <h2>Features</h2>
-          <div className="bento-grid">
-            <div className="tile large">
-              <h3>AI-Powered Generation</h3>
-              <p>Leverage advanced AI to transform GitHub repositories into professional PRDs instantly.</p>
+        {!prd && !loading && (
+        <div className="how-it-works" id="how-it-works">
+          <h2>How it Works</h2>
+          <div className="steps">
+            <div className="step">
+              <div className="step-number">1</div>
+              <h3>Paste GitHub URL</h3>
+              <p>Copy any public GitHub repository link and paste it in the input box.</p>
             </div>
-            <div className="tile">
-              <h3>Lightning Fast</h3>
-              <p>Get your PRD in seconds, not hours.</p>
+            <div className="step">
+              <div className="step-number">2</div>
+              <h3>AI Generates PRD</h3>
+              <p>Our AI reads your README, dependencies and repo data to write a full PRD.</p>
             </div>
-            <div className="tile">
-              <h3>Multiple Formats</h3>
-              <p>Export as TXT, PDF, or DOCX to fit your workflow.</p>
-            </div>
-            <div className="tile">
-              <h3>GitHub Integration</h3>
-              <p>Directly analyze any public GitHub repo with a simple URL.</p>
-            </div>
-            <div className="tile">
-              <h3>Professional Quality</h3>
-              <p>Generate detailed, structured PRDs ready for stakeholders.</p>
-            </div>
-            <div className="tile small">
-              <h3>Free to Use</h3>
-              <p>No subscriptions or hidden fees.</p>
+            <div className="step">
+              <div className="step-number">3</div>
+              <h3>Download Instantly</h3>
+              <p>Get your PRD as TXT, PDF or DOCX — ready to share with anyone.</p>
             </div>
           </div>
         </div>
       )}
+        <div className="features" id="features">
+          <h2>Everything you need to ship faster</h2>
+          <p className="features-sub">From GitHub repo to investor-ready PRD in under 30 seconds.</p>
+          <div className="bento-grid">
+
+            <div className="tile tile-wide">
+              <div className="tile-icon">🤖</div>
+              <h3>AI-Powered PRD Generation</h3>
+              <p>Paste any GitHub URL and our AI reads your README, dependencies, and repo metadata to generate a complete 10-section Product Requirements Document — ready to share with investors, clients, or your team.</p>
+              <div className="tile-tag">Core Feature</div>
+            </div>
+
+            <div className="tile tile-tall">
+              <div className="tile-icon">⚡</div>
+              <h3>Lightning Fast</h3>
+              <p>Get a full PRD in under 30 seconds. No manual writing, no templates, no wasted hours.</p>
+              <div className="tile-stat">30s</div>
+            </div>
+
+            <div className="tile">
+              <div className="tile-icon">📄</div>
+              <h3>3 Download Formats</h3>
+              <p>Export as TXT, PDF, or Word DOCX — whatever your workflow needs.</p>
+            </div>
+
+            <div className="tile">
+              <div className="tile-icon">🔗</div>
+              <h3>GitHub Integration</h3>
+              <p>Works with browser URLs, HTTPS clone links, and SSH URLs.</p>
+            </div>
+
+            <div className="tile tile-wide">
+              <div className="tile-icon">🏗️</div>
+              <h3>Infrastructure Recommendations</h3>
+              <p>Every PRD includes hosting and domain recommendations so your team can go from idea to deployed — without extra research.</p>
+              <div className="tile-tag">Built-in</div>
+            </div>
+
+            <div className="tile">
+              <div className="tile-icon">🎯</div>
+              <h3>Stakeholder Ready</h3>
+              <p>Generated for non-technical readers — investors, managers, clients.</p>
+            </div>
+
+          </div>
+        </div>
+      
 
       {loading && (
         <div className="result skeleton">
@@ -179,6 +261,32 @@ function App() {
                 <span>Get Domain</span>
               </a>
             </div>
+          </div>
+        </div>
+      )}
+    <footer className="footer">
+        <span>Made by <strong>Purple Merit</strong></span>
+        <span className="footer-divider">|</span>
+        <a href="#privacy" onClick={function(e){ e.preventDefault(); setShowPrivacy(true); }}>Privacy Policy</a>
+        <span className="footer-divider">|</span>
+        <a href="mailto:contact@purplemerit.com">Contact</a>
+      </footer>
+    {showPrivacy && (
+        <div className="privacy-overlay" onClick={function(){ setShowPrivacy(false); }}>
+          <div className="privacy-modal" onClick={function(e){ e.stopPropagation(); }}>
+            <button className="privacy-close" onClick={function(){ setShowPrivacy(false); }}>✕</button>
+            <h2>Privacy Policy</h2>
+            <p><strong>Last updated:</strong> April 2026</p>
+            <h3>What we collect</h3>
+            <p>We only process the GitHub repository URL you submit. We do not store any personal data or repository content after your session ends.</p>
+            <h3>How we use it</h3>
+            <p>Your GitHub URL is used solely to fetch repository metadata and generate a PRD. It is never shared with third parties.</p>
+            <h3>Cookies</h3>
+            <p>We do not use tracking cookies or analytics that identify individual users.</p>
+            <h3>Affiliate Links</h3>
+            <p>Our PRDs contain affiliate links to hosting providers. We may earn a commission if you purchase through these links at no extra cost to you.</p>
+            <h3>Contact</h3>
+            <p>For privacy questions email us at contact@purplemerit.com</p>
           </div>
         </div>
       )}
