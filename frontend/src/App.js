@@ -12,9 +12,14 @@ function App() {
   const [repoName, setRepoName] = useState('');
   const [error, setError] = useState('');
   const [steps, setSteps] = useState([]);
+  const [history, setHistory] = useState(() => {
+    const saved = localStorage.getItem('prd-history');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [format, setFormat] = useState('txt');
   const [downloading, setDownloading] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [activeTab, setActiveTab] = useState('home');
 
   const handleGenerate = async () => {
     if (!url) return setError('Please enter a GitHub URL');
@@ -57,6 +62,16 @@ function App() {
       await new Promise(r => setTimeout(r, 500));
       setPrd(res.data.prd);
       setRepoName(res.data.repoName);
+
+      const newEntry = {
+        repoName: res.data.repoName,
+        repoUrl: url,
+        date: new Date().toLocaleDateString(),
+        time: new Date().toLocaleTimeString()
+      };
+      const updatedHistory = [newEntry, ...history].slice(0, 3);
+      setHistory(updatedHistory);
+      localStorage.setItem('prd-history', JSON.stringify(updatedHistory));
     } catch (err) {
       setError(err.response?.data?.error || 'Something went wrong. Try again.');
     } finally {
@@ -90,6 +105,12 @@ function App() {
       setError('Download failed. Try again.');
     } finally {
       setDownloading(false);
+      const updatedHistory = history.map(function(h, i) {
+        if (i === 0) return { ...h, format: format };
+        return h;
+      });
+      setHistory(updatedHistory);
+      localStorage.setItem('prd-history', JSON.stringify(updatedHistory));
     }
   };
 
@@ -98,11 +119,13 @@ function App() {
       <nav className="navbar">
         <div className="nav-logo">RepoDoc AI</div>
         <div className="nav-links">
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it Works</a>
+          <a href="#features" onClick={function(){ setActiveTab('home'); }}>Features</a>
+          <a href="#how-it-works" onClick={function(){ setActiveTab('home'); }}>How it Works</a>
           <a href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+          
+            <a href="#history" className={activeTab === 'history' ? 'nav-active' : ''} onClick={function(e){ e.preventDefault(); setActiveTab('history'); }}>History ({history.length})</a>
         </div>
-        <button className="nav-cta" onClick={handleGenerate}>Try Free</button>
+        <button className="nav-cta" onClick={function(){ setActiveTab('home'); handleGenerate(); }}>Try Free</button>
       </nav>
       <div className="hero">
         <h1>GitHub Repo to PRD Generator</h1>
@@ -135,6 +158,85 @@ function App() {
           </div>
         )}
       </div>
+      {activeTab === 'history' && (
+        <div className="history-page">
+          <div className="history-header">
+            <h1>Your PRD History</h1>
+            <p>Last 3 PRDs you generated</p>
+          </div>
+
+          {history.length === 0 ? (
+            <div className="history-empty">
+              <div className="empty-icon">📭</div>
+              <h3>No history yet</h3>
+              <p>Generate your first PRD to see it here</p>
+              <button className="nav-cta" onClick={function(){ setActiveTab('home'); }}>
+                Generate PRD
+              </button>
+            </div>
+          ) : (
+            <div className="history-list">
+              {history.map(function(h, i) {
+                return (
+                  <div key={i} className="history-card">
+                    <div className="history-card-top">
+                      <div className="history-card-icon">📄</div>
+                      <div className="history-card-info">
+                        <div className="history-name">{h.repoName}</div>
+                        <a href={h.repoUrl} target="_blank" rel="noreferrer" className="history-url">
+                          {h.repoUrl}
+                        </a>
+                      </div>
+                      {h.format && (
+                        <span className="history-format">{h.format.toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="history-card-bottom">
+                      <span className="history-meta">Generated on {h.date} at {h.time}</span>
+                      <button
+                        className="history-btn"
+                        onClick={function(){
+                          setUrl(h.repoUrl);
+                          setActiveTab('home');
+                        }}
+                      >
+                        Regenerate
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <button className="clear-history" onClick={function(){
+                setHistory([]);
+                localStorage.removeItem('prd-history');
+              }}>
+                Clear All History
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'home' && !prd && !loading && (
+        <div className="stats-bar">
+          <div className="stat-item">
+            <div className="stat-number">10K+</div>
+            <div className="stat-label">PRDs Generated</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-number">5K+</div>
+            <div className="stat-label">Happy Users</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-number">30s</div>
+            <div className="stat-label">Avg Generation Time</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-number">$0</div>
+            <div className="stat-label">Cost to Start</div>
+          </div>
+        </div>
+      )}
         {!prd && !loading && (
         <div className="how-it-works" id="how-it-works">
           <h2>How it Works</h2>
