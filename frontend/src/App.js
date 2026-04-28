@@ -2,6 +2,8 @@ import { useState } from 'react';
 import axios from 'axios';
 import './App.css';
 
+const API_BASE_URL = 'https://prd-generator-3oqy.onrender.com';
+
 function App() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,7 @@ function App() {
       await new Promise(r => setTimeout(r, 1000));
 
       setStep('AI is generating your PRD...');
-      const res = await axios.post('https://prd-generator-3oqy.onrender.com/api/generate', { repoUrl: url });
+      const res = await axios.post(`${API_BASE_URL}/api/generate`, { repoUrl: url });
 
       setStep('PRD Generated!');
       setPrd(res.data.prd);
@@ -42,7 +44,7 @@ function App() {
     setDownloading(true);
     try {
       const res = await axios.post(
-        'https://prd-generator-3oqy.onrender.com/api/download',
+        `${API_BASE_URL}/api/download`,
         { prd, repoName, format },
         { responseType: 'blob' }
       );
@@ -88,6 +90,55 @@ function App() {
         {error && <p className="error">{error}</p>}
         {loading && <p className="step">{step}</p>}
       </div>
+
+      {!prd && !loading && (
+        <div className="features">
+          <h2>Features</h2>
+          <div className="bento-grid">
+            <div className="tile large">
+              <h3>AI-Powered Generation</h3>
+              <p>Leverage advanced AI to transform GitHub repositories into professional PRDs instantly.</p>
+            </div>
+            <div className="tile">
+              <h3>Lightning Fast</h3>
+              <p>Get your PRD in seconds, not hours.</p>
+            </div>
+            <div className="tile">
+              <h3>Multiple Formats</h3>
+              <p>Export as TXT, PDF, or DOCX to fit your workflow.</p>
+            </div>
+            <div className="tile">
+              <h3>GitHub Integration</h3>
+              <p>Directly analyze any public GitHub repo with a simple URL.</p>
+            </div>
+            <div className="tile">
+              <h3>Professional Quality</h3>
+              <p>Generate detailed, structured PRDs ready for stakeholders.</p>
+            </div>
+            <div className="tile small">
+              <h3>Free to Use</h3>
+              <p>No subscriptions or hidden fees.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="result skeleton">
+          <div className="result-header">
+            <div className="skeleton-block title"></div>
+            <div className="skeleton-block download"></div>
+          </div>
+          <div className="skeleton-block content"></div>
+          <div className="affiliate">
+            <div className="skeleton-block affiliate-title"></div>
+            <div className="affiliate-cards">
+              <div className="skeleton-block card"></div>
+              <div className="skeleton-block card"></div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {prd && (
         <div className="result">
